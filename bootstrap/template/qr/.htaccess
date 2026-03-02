@@ -1,0 +1,10 @@
+AddDefaultCharset UTF-8
+RewriteEngine on
+RewriteRule ^thoat.html$ quanly/thoat.php [L]
+
+
+# Rewrite mode tin tuc #
+RewriteRule ^trangchu.html index.php
+RewriteRule ^gioi-thieu.html gioi-thieu.php
+RewriteRule ^chi-tiet-(.*)-(.*).html$ chitiet.php?masach=$2 [L]
+RewriteRule ^category-(.*)-(.*).html$ sachloai.php?cat_id=$2 [L]
