@@ -99,7 +99,6 @@ $db['default'] = array(
 
 
 
-
 $db['serverdb'] = array(
 	'dsn'	=> '',
 	'hostname' => $sq_hostname,

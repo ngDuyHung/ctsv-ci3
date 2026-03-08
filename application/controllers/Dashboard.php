@@ -14,6 +14,12 @@ class Dashboard extends CI_Controller {
 	   $this->load->model("result_model");
 	   $this->load->library("session");
 	   $this->lang->load('basic', $this->config->item('language'));
+
+		// Cho phép k6 gửi kết quả test mà không cần đăng nhập
+		if ($this->uri->segment(2) === 'save_k6_result') {
+			return;
+		}
+
 		// redirect if not loggedin
 		//echo "Noi dung session:";print_r($_SESSION);
 		//print_r($this->session->userdata('logged_in'));
@@ -102,7 +108,9 @@ class Dashboard extends CI_Controller {
 
 		$total_keys = 0;
 		$total_5m = 0; $logged_5m = 0;
-		$active_1m = 0; $active_30s = 0;
+		$sessions_1m = 0; $sessions_30s = 0;
+		// Đếm unique users bằng UID từ session data
+		$uids_5m = array(); $uids_1m = array(); $uids_30s = array();
 
 		// SCAN qua tất cả session keys, dùng pipeline cho TTL batch
 		$iterator = null;
@@ -151,12 +159,22 @@ class Dashboard extends CI_Controller {
 				$total_5m++;
 				$data = $data_results[$i];
 				$has_login = ($data !== false && strpos($data, 'logged_in') !== false);
-				if ($has_login) $logged_5m++;
+				if ($has_login) {
+					$logged_5m++;
+					// Extract UID từ serialized session data
+					$uid = null;
+					if (preg_match('/"uid";s:\d+:"(\d+)"/', $data, $m)) {
+						$uid = $m[1];
+					}
+					if ($uid !== null) $uids_5m[$uid] = 1;
 
-				if ($ak['idle'] <= 60) {
-					if ($has_login) $active_1m++;
-					if ($ak['idle'] <= 30) {
-						if ($has_login) $active_30s++;
+					if ($ak['idle'] <= 60) {
+						$sessions_1m++;
+						if ($uid !== null) $uids_1m[$uid] = 1;
+						if ($ak['idle'] <= 30) {
+							$sessions_30s++;
+							if ($uid !== null) $uids_30s[$uid] = 1;
+						}
 					}
 				}
 			}
@@ -165,18 +183,170 @@ class Dashboard extends CI_Controller {
 		$redis->close();
 
 		echo json_encode(array(
-			'total_5m'   => (int) $total_5m,
-			'logged_5m'  => (int) $logged_5m,
-			'active_1m'  => (int) $active_1m,
-			'active_30s' => (int) $active_30s,
-			'total_db'   => (int) $total_keys,
-			'time'       => date('H:i:s'),
-			'ts'         => $now
+			'total_5m'    => (int) $total_5m,
+			'logged_5m'   => (int) $logged_5m,
+			'active_1m'   => (int) $sessions_1m,
+			'active_30s'  => (int) $sessions_30s,
+			'users_5m'    => count($uids_5m),
+			'users_1m'    => count($uids_1m),
+			'users_30s'   => count($uids_30s),
+			'total_db'    => (int) $total_keys,
+			'time'        => date('H:i:s'),
+			'ts'          => $now
 		));
 		exit;
 	}
 
-		public function config(){
+	/**
+	 * AJAX endpoint: nhận kết quả k6 test và lưu vào Redis cache
+	 * Gọi từ k6 handleSummary() sau mỗi lần test
+	 */
+	public function save_k6_result()
+	{
+		while (ob_get_level()) { ob_end_clean(); }
+		header('Content-Type: application/json; charset=UTF-8');
+		header('Cache-Control: no-cache');
+
+		// Chỉ chấp nhận POST từ localhost
+		$ip = $this->input->ip_address();
+		if (!in_array($ip, array('127.0.0.1', '::1', '0.0.0.0'))) {
+			http_response_code(403);
+			echo json_encode(array('error' => 'Only localhost allowed'));
+			exit;
+		}
+
+		$json = file_get_contents('php://input');
+		$data = json_decode($json, true);
+		if (!$data || !isset($data['timestamp'])) {
+			http_response_code(400);
+			echo json_encode(array('error' => 'Invalid data'));
+			exit;
+		}
+
+		$redis = new Redis();
+		try {
+			$redis->connect('127.0.0.1', 6379, 3);
+			$redis->select(1); // cache DB
+
+			// Lưu kết quả mới nhất
+			$redis->set('k6_last_result', $json);
+
+			// Lưu history (max 20 kết quả)
+			$redis->lPush('k6_results_history', $json);
+			$redis->lTrim('k6_results_history', 0, 19);
+
+			$redis->close();
+			echo json_encode(array('status' => 'ok'));
+		} catch (Exception $e) {
+			http_response_code(500);
+			echo json_encode(array('error' => 'Redis error'));
+		}
+		exit;
+	}
+
+	/**
+	 * AJAX endpoint: trả về kết quả k6 test gần nhất và history
+	 */
+	/**
+	 * AJAX endpoint: xóa 1 dòng lịch sử k6 theo timestamp
+	 */
+	public function delete_k6_result()
+	{
+		$logged_in = $this->session->userdata('logged_in');
+		session_write_close();
+
+		while (ob_get_level()) { ob_end_clean(); }
+		header('Content-Type: application/json; charset=UTF-8');
+		header('Cache-Control: no-cache');
+
+		if (!$logged_in || $logged_in['su'] != '1') {
+			http_response_code(403);
+			echo json_encode(array('error' => 'forbidden'));
+			exit;
+		}
+
+		$ts = $this->input->post('ts');
+		if (!$ts) {
+			http_response_code(400);
+			echo json_encode(array('error' => 'Missing ts'));
+			exit;
+		}
+
+		$redis = new Redis();
+		try {
+			$redis->connect('127.0.0.1', 6379, 3);
+			$redis->select(1);
+
+			$history_raw = $redis->lRange('k6_results_history', 0, -1);
+			$redis->delete('k6_results_history');
+			foreach ($history_raw as $item) {
+				$d = json_decode($item, true);
+				if ($d && isset($d['timestamp']) && $d['timestamp'] === $ts) continue;
+				$redis->rPush('k6_results_history', $item);
+			}
+
+			// Nếu xóa bản ghi mới nhất thì cập nhật k6_last_result
+			$last_raw = $redis->get('k6_last_result');
+			$last = $last_raw ? json_decode($last_raw, true) : null;
+			if ($last && isset($last['timestamp']) && $last['timestamp'] === $ts) {
+				$new_last = $redis->lIndex('k6_results_history', 0);
+				if ($new_last) $redis->set('k6_last_result', $new_last);
+				else $redis->delete('k6_last_result');
+			}
+
+			$redis->close();
+			echo json_encode(array('status' => 'ok'));
+		} catch (Exception $e) {
+			http_response_code(500);
+			echo json_encode(array('error' => 'Redis error'));
+		}
+		exit;
+	}
+
+	public function get_k6_result()
+	{
+		$logged_in = $this->session->userdata('logged_in');
+		session_write_close();
+
+		while (ob_get_level()) { ob_end_clean(); }
+		header('Content-Type: application/json; charset=UTF-8');
+		header('Cache-Control: no-cache');
+
+		if (!$logged_in || $logged_in['su'] != '1') {
+			http_response_code(403);
+			echo json_encode(array('error' => 'forbidden'));
+			exit;
+		}
+
+		$redis = new Redis();
+		try {
+			$redis->connect('127.0.0.1', 6379, 3);
+			$redis->select(1);
+
+			$last = $redis->get('k6_last_result');
+			$history_raw = $redis->lRange('k6_results_history', 0, 19);
+			$redis->close();
+
+			$last_data = $last ? json_decode($last, true) : null;
+			$history = array();
+			if ($history_raw) {
+				foreach ($history_raw as $h) {
+					$d = json_decode($h, true);
+					if ($d) $history[] = $d;
+				}
+			}
+
+			echo json_encode(array(
+				'last' => $last_data,
+				'history' => $history
+			));
+		} catch (Exception $e) {
+			echo json_encode(array('last' => null, 'history' => array()));
+		}
+		exit;
+	}
+
+	public function config(){
 		
 		$logged_in=$this->session->userdata('logged_in');
 
@@ -242,7 +412,44 @@ class Dashboard extends CI_Controller {
 		$this->load->view('css',$data);
 		$this->load->view('footer',$data);
 
-		}		
+		}
+
+	/**
+	 * Xóa OPcache để PHP load lại code mới nhất
+	 * Chỉ admin (su=1) mới được gọi
+	 */
+	public function clear_cache()
+	{
+		$logged_in = $this->session->userdata('logged_in');
+		if (!isset($logged_in['su']) || $logged_in['su'] != '1') {
+			show_error('Không có quyền truy cập', 403);
+			return;
+		}
+
+		$results = [];
+
+		// Xóa OPcache
+		if (function_exists('opcache_reset')) {
+			$results['opcache'] = opcache_reset() ? 'OK' : 'FAIL';
+		} else {
+			$results['opcache'] = 'Không khả dụng';
+		}
+
+		// Xóa cache của CI (application/cache/)
+		$cache_path = APPPATH . 'cache/';
+		$deleted = 0;
+		foreach (glob($cache_path . '*') as $file) {
+			if (is_file($file) && basename($file) !== 'index.html' && basename($file) !== '.htaccess') {
+				unlink($file);
+				$deleted++;
+			}
+		}
+		$results['ci_cache'] = "Đã xóa $deleted file";
+
+		$this->output
+			->set_content_type('application/json')
+			->set_output(json_encode(['success' => true, 'results' => $results]));
+	}		
 		
 		
 		

@@ -100,7 +100,7 @@ class CI_Session_redis_driver extends CI_Session_driver implements SessionHandle
 				'port' => empty($matches[2]) ? NULL : $matches[2],
 				'password' => preg_match('#auth=([^\s&]+)#', $matches[3], $match) ? $match[1] : NULL,
 				'database' => preg_match('#database=(\d+)#', $matches[3], $match) ? (int) $match[1] : NULL,
-				'timeout' => preg_match('#timeout=(\d+\.\d+)#', $matches[3], $match) ? (float) $match[1] : NULL
+				'timeout' => preg_match('#timeout=(\d+\.?\d*)#', $matches[3], $match) ? (float) $match[1] : NULL
 			);
 
 			preg_match('#prefix=([^\s&]+)#', $matches[3], $match) && $this->_key_prefix = $match[1];
@@ -135,7 +135,7 @@ class CI_Session_redis_driver extends CI_Session_driver implements SessionHandle
 		}
 
 		$redis = new Redis();
-		if ( ! $redis->connect($this->_config['save_path']['host'], $this->_config['save_path']['port'], $this->_config['save_path']['timeout']))
+		if ( ! $redis->pconnect($this->_config['save_path']['host'], $this->_config['save_path']['port'], $this->_config['save_path']['timeout']))
 		{
 			log_message('error', 'Session: Unable to connect to Redis with the configured settings.');
 		}
@@ -252,16 +252,9 @@ class CI_Session_redis_driver extends CI_Session_driver implements SessionHandle
 		if (isset($this->_redis))
 		{
 			try {
-				$ping = $this->_redis->ping();
-				// phpredis 5.x+ returns TRUE, older versions return '+PONG'
-				if ($ping === TRUE OR $ping === '+PONG')
-				{
-					$this->_release_lock();
-					if ($this->_redis->close() === $this->_failure)
-					{
-						return $this->_fail();
-					}
-				}
+				// Giải phóng lock TRƯỚC, không phụ thuộc vào ping
+				$this->_release_lock();
+				// pconnect: không close() — kết nối được tái sử dụng
 			}
 			catch (RedisException $e)
 			{
@@ -344,7 +337,7 @@ class CI_Session_redis_driver extends CI_Session_driver implements SessionHandle
 		{
 			if (($ttl = $this->_redis->ttl($lock_key)) > 0)
 			{
-				sleep(1);
+				usleep(100000); // 100ms thay vì 1s — giảm thời gian chờ lock
 				continue;
 			}
 

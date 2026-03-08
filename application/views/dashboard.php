@@ -7,6 +7,28 @@
   <!-- Real-time Active Sessions Monitor -->
   <?php $logged_in = $this->session->userdata('logged_in');
   if (isset($logged_in['su']) && $logged_in['su'] == '1'): ?>
+
+  
+  <script>
+  function clearServerCache() {
+    var btn = document.getElementById('btn-clear-cache');
+    var msg = document.getElementById('clear-cache-msg');
+    btn.disabled = true;
+    msg.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Đang xóa...';
+    fetch('<?php echo base_url('dashboard/clear_cache'); ?>', {method: 'GET'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.success) {
+          var info = Object.keys(data.results).map(function(k){ return k + ': ' + data.results[k]; }).join(' | ');
+          msg.innerHTML = '<span style="color:green"><i class="fa fa-check"></i> Cache đã xóa! (' + info + ') – Nhấn Ctrl+Shift+R để reload trình duyệt.</span>';
+        } else {
+          msg.innerHTML = '<span style="color:red">Lỗi!</span>';
+        }
+        btn.disabled = false;
+      })
+      .catch(function(){ msg.innerHTML = '<span style="color:red">Lỗi kết nối!</span>'; btn.disabled = false; });
+  }
+  </script>
     <style>
       #rt-monitor {
         margin-bottom: 18px
@@ -378,14 +400,14 @@
           <div class="rt-card">
             <div class="rt-ico" style="color:#e74c3c"><i class="fa fa-users"></i></div>
             <div class="rt-val" style="color:#e74c3c" id="v-concurrent">0</div>
-            <div class="rt-lbl">Người dùng đồng thời</div>
-            <div class="rt-sub">Hoạt động trong 30 giây qua</div>
+            <div class="rt-lbl">Phiên đồng thời</div>
+            <div class="rt-sub">Sessions hoạt động trong 30s (<span id="v-users30">0</span> users)</div>
           </div>
           <div class="rt-card">
             <div class="rt-ico" style="color:#3498db"><i class="fa fa-user"></i></div>
             <div class="rt-val" style="color:#3498db" id="v-active">0</div>
             <div class="rt-lbl">Đang online</div>
-            <div class="rt-sub">Hoạt động trong 1 phút qua</div>
+            <div class="rt-sub">Sessions trong 1 phút (<span id="v-users1m">0</span> users)</div>
           </div>
           <div class="rt-card">
             <div class="rt-ico" style="color:#f39c12"><i class="fa fa-bolt"></i></div>
@@ -653,7 +675,7 @@
           };
 
           // Check for incident first (errors take priority)
-          if (consecErrors >= 3) {
+          if (consecErrors >= 400) {
             h.level = 'incident';
             h.color = '#fff';
             h.bg = '#c0392b';
@@ -687,12 +709,14 @@
           }
 
           // Concurrent users + response time combined assessment
+          // MAX_CAPACITY = 500 VUs (đã kiểm thử thực tế)
+          // Ngưỡng: 0 → nhàn / ≤30 → rất tốt / ≤150 → tốt / ≤300 → trung bình / ≤450 → cao / >450 hoặc RT cao → quá tải
           if (conc === 0 && avgRT < 500 && errRate === 0) {
             h.level = 'idle';
             h.color = '#7f8c8d';
             h.bg = '#f8f9fa';
             h.icon = 'fa-moon-o';
-            h.label = 'HẾ THỐNG RÃNH RỖI';
+            h.label = 'HỆ THỐNG NHÀN RỖI';
             h.desc = 'Không có người dùng nào đang truy cập. Hệ thống hoạt động bình thường, sẵn sàng phục vụ. Thời gian phản hồi: ' + avgRT + 'ms.';
             return h;
           }
@@ -706,44 +730,44 @@
             h.desc = 'Hệ thống đang chạy mượt mà với ' + conc + ' người đồng thời. Phản hồi nhanh (' + avgRT + 'ms), không có lỗi. Tài nguyên còn dư để phục vụ thêm nhiều người dùng.';
             return h;
           }
-          if (conc <= 100 && avgRT < 1000) {
+          if (conc <= 450 && avgRT < 800) {
             h.level = 'good';
             h.color = '#fff';
             h.bg = '#2ecc71';
             h.icon = 'fa-thumbs-up';
             h.animation = 'healthPulse 2s infinite';
             h.label = 'HOẠT ĐỘNG TỐT';
-            h.desc = 'Hệ thống đáp ứng tốt với ' + conc + ' người đồng thời. Phản hồi ' + avgRT + 'ms - vẫn nằm trong mức chấp nhận được. ' + (trend > 0 ? 'ải đang tăng, cần theo dõi.' : 'ải ổn định.');
+            h.desc = 'Hệ thống đáp ứng tốt với ' + conc + ' người đồng thời. Phản hồi ' + avgRT + 'ms - nằm trong mức chấp nhận được. ' + (trend > 0 ? 'Tải đang tăng, cần theo dõi.' : 'Tải ổn định.');
             return h;
           }
-          if (conc <= 200 && avgRT < 1500) {
+          if (conc <= 600 && avgRT < 1500) {
             h.level = 'normal';
             h.color = '#fff';
             h.bg = '#3498db';
             h.icon = 'fa-info-circle';
             h.label = 'TẢI TRUNG BÌNH';
-            h.desc = conc + ' người đồng thời, phản hồi ' + avgRT + 'ms. Hệ thống vẫn đáp ứng được nhưng bắt đầu chịu tải. ' + (trend > 0 ? 'Xu hướng tăng - cần chú ý theo dõi thêm.' : 'Xu hướng ổn định.');
+            h.desc = conc + ' người đồng thời, phản hồi ' + avgRT + 'ms. Hệ thống vẫn đáp ứng tốt nhưng bắt đầu chịu tải. ' + (trend > 0 ? 'Xu hướng tăng - cần chú ý theo dõi thêm.' : 'Xu hướng ổn định.');
             return h;
           }
-          if (conc <= 300 && avgRT < 2000) {
+          if (conc <= 2050 && avgRT < 2500) {
             h.level = 'warning';
             h.color = '#fff';
             h.bg = '#f39c12';
             h.icon = 'fa-exclamation-triangle';
             h.animation = 'healthWarn 2s infinite';
             h.label = 'TẢI CAO - CẦN THEO DÕI';
-            h.desc = conc + ' người đồng thời, phản hồi ' + avgRT + 'ms. Hệ thống đang chịu tải cao. Người dùng có thể cảm thấy trang web chậm hơn bình thường. ' + (conc > 250 ? 'ần đạt ngưỡng quá tải!' : 'ần theo dõi sát.');
+            h.desc = conc + ' người đồng thời, phản hồi ' + avgRT + 'ms. Hệ thống đang chịu tải cao. Người dùng có thể cảm thấy trang web chậm hơn bình thường. ' + (conc > 350 ? 'Gần đạt ngưỡng quá tải!' : 'Cần theo dõi sát.');
             return h;
           }
-          // conc > 300 or avgRT > 2000
-          h.level = 'critical';
-          h.color = '#fff';
-          h.bg = '#e74c3c';
-          h.icon = 'fa-warning';
-          h.animation = 'healthCrit 1.5s infinite';
-          h.label = 'QUÁ TẢI';
-          h.desc = conc + ' người đồng thời, phản hồi ' + avgRT + 'ms. Hệ thống đang quá tải! Người dùng sẽ gặp tình trạng chậm, timeout. ' + (errRate > 5 ? 'Đã có ' + errRate.toFixed(1) + '% yêu cầu bị lỗi. ' : '') + 'ần cảnh báo giảm tải hoặc nâng cấp.';
-          return h;
+          // // conc > 450 hoặc avgRT > 2500
+          // h.level = 'critical';
+          // h.color = '#fff';
+          // h.bg = '#e74c3c';
+          // h.icon = 'fa-warning';
+          // h.animation = 'healthCrit 1.5s infinite';
+          // h.label = 'QUÁ TẢI';
+          // h.desc = conc + ' người đồng thời, phản hồi ' + avgRT + 'ms. Hệ thống đang quá tải! Người dùng sẽ gặp tình trạng chậm, timeout. ' + (errRate > 5 ? 'Đã có ' + errRate.toFixed(1) + '% yêu cầu bị lỗi. ' : '') + 'Cần cảnh báo giảm tải hoặc nâng cấp.';
+          // return h;
         }
 
         function updateHealth(d, respTime) {
@@ -788,8 +812,8 @@
 
           // Response Time indicator
           var rtPct = Math.min(100, avgRT / 3000 * 100);
-          var rtColor = avgRT < 500 ? '#27ae60' : avgRT < 1000 ? '#2ecc71' : avgRT < 2000 ? '#f39c12' : '#e74c3c';
-          $('#hd-rt-val').text(avgRT + 'ms' + (avgRT < 500 ? ' - Rat nhanh' : avgRT < 1000 ? ' - Nhanh' : avgRT < 2000 ? ' - Cham' : ' - Rat cham!'));
+          var rtColor = avgRT < 500 ? '#27ae60' : avgRT < 2000 ? '#2ecc71' : avgRT < 2500 ? '#f39c12' : '#e74c3c';
+          $('#hd-rt-val').text(avgRT + 'ms' + (avgRT < 500 ? ' - Rat nhanh' : avgRT < 2000 ? ' - Nhanh' : avgRT < 2500 ? ' - Cham' : ' - Rat cham!'));
           $('#hd-rt-bar').css({
             width: rtPct + '%',
             background: rtColor
@@ -891,6 +915,8 @@
               $('#v-active').text(act);
               $('#v-sessions').text(sess);
               $('#v-db').text(db);
+              $('#v-users30').text(d.users_30s || 0);
+              $('#v-users1m').text(d.users_1m || 0);
               $('#rt-time').text(d.time);
               $('#rt-status').text('Live');
               $('#rt-dot').css('background', '#2ecc71');
@@ -1007,6 +1033,474 @@
           $('#rt-reset').on('click', function() {
             resetAll();
           });
+        });
+      })();
+    </script>
+
+    <!-- K6 Load Test Results Panel -->
+    <style>
+      #k6-panel {
+        margin-top: 18px
+      }
+
+      .k6-hdr {
+        background: linear-gradient(135deg, #2c3e50, #3498db);
+        color: #fff;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap
+      }
+
+      .k6-hdr h4 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600
+      }
+
+      .k6-hdr-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px
+      }
+
+      .k6-body {
+        background: #f7f8fc;
+        border: 1px solid #dde;
+        border-top: 0;
+        border-radius: 0 0 8px 8px;
+        padding: 14px
+      }
+
+      .k6-empty {
+        text-align: center;
+        padding: 30px;
+        color: #aaa;
+        font-size: 14px
+      }
+
+      .k6-verdict {
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 14px
+      }
+
+      .k6-verdict-icon {
+        font-size: 42px
+      }
+
+      .k6-verdict-info h3 {
+        margin: 0 0 4px;
+        font-size: 18px;
+        font-weight: 700
+      }
+
+      .k6-verdict-info p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.5;
+        opacity: .9
+      }
+
+      .k6-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 10px;
+        margin-bottom: 14px
+      }
+
+      .k6-metric {
+        background: #fff;
+        border-radius: 8px;
+        padding: 12px;
+        border: 1px solid #e8e8e8
+      }
+
+      .k6-metric-title {
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 4px
+      }
+
+      .k6-metric-title i {
+        font-size: 10px
+      }
+
+      .k6-metric-val {
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1.2
+      }
+
+      .k6-metric-desc {
+        font-size: 10px;
+        color: #aaa;
+        margin-top: 3px;
+        line-height: 1.4
+      }
+
+      .k6-metric-badge {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-size: 9px;
+        font-weight: 600;
+        margin-left: 4px;
+        vertical-align: middle
+      }
+
+      .k6-checks {
+        background: #fff;
+        border-radius: 8px;
+        padding: 12px;
+        border: 1px solid #e8e8e8;
+        margin-bottom: 14px
+      }
+
+      .k6-checks h5 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #555
+      }
+
+      .k6-check-bar {
+        height: 8px;
+        border-radius: 4px;
+        background: #f0f0f0;
+        overflow: hidden;
+        margin-bottom: 6px
+      }
+
+      .k6-check-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width .3s
+      }
+
+      .k6-check-stats {
+        font-size: 11px;
+        color: #888
+      }
+
+      .k6-history {
+        background: #fff;
+        border-radius: 8px;
+        padding: 12px;
+        border: 1px solid #e8e8e8
+      }
+
+      .k6-history h5 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #555
+      }
+
+      .k6-history table {
+        width: 100%;
+        font-size: 11px;
+        border-collapse: collapse
+      }
+
+      .k6-history th {
+        text-align: left;
+        padding: 4px 6px;
+        border-bottom: 2px solid #eee;
+        color: #888;
+        font-weight: 600
+      }
+
+      .k6-history td {
+        padding: 4px 6px;
+        border-bottom: 1px solid #f5f5f5
+      }
+
+      .k6-history tr:hover td {
+        background: #fafafa
+      }
+
+      .k6-del-btn {
+        background: none;
+        border: none;
+        color: #ccc;
+        cursor: pointer;
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1;
+        transition: color .15s, background .15s
+      }
+
+      .k6-del-btn:hover {
+        color: #e74c3c;
+        background: #fdf0f0
+      }
+    </style>
+    <div id="k6-panel">
+      <div class="k6-hdr">
+        <h4><i class="fa fa-flask"></i>&nbsp; KẾT QUẢ LOAD TEST (k6)</h4>
+        <div class="k6-hdr-right">
+          <span id="k6-last-time" style="opacity:.8">Chưa có test</span>
+          <button class="rt-btn" id="k6-refresh" title="Tải lại kết quả"><i class="fa fa-refresh"></i> Refresh</button>
+        </div>
+      </div>
+      <div class="k6-body">
+        <div id="k6-content">
+          <div class="k6-empty"><i class="fa fa-flask" style="font-size:40px;display:block;margin-bottom:10px"></i>Chưa có kết quả load test nào.<br><small>Chạy <code>k6 run script.js</code> để bắt đầu.</small></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function() {
+        var K6_API = window.base_url ? window.base_url + 'dashboard/get_k6_result' : '<?php echo site_url("dashboard/get_k6_result"); ?>';
+
+        function fmtMs(ms) {
+          if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
+          return Math.round(ms) + 'ms';
+        }
+
+        function fmtBytes(b) {
+          if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+          if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+          return b + ' B';
+        }
+
+        function fmtDuration(ms) {
+          var s = Math.floor(ms / 1000);
+          var m = Math.floor(s / 60);
+          s = s % 60;
+          return m + ' phút ' + s + ' giây';
+        }
+
+        function fmtTime(iso) {
+          if (!iso) return '--';
+          var d = new Date(iso);
+          return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN');
+        }
+
+        function badge(text, color) {
+          return '<span class="k6-metric-badge" style="background:' + color + '22;color:' + color + '">' + text + '</span>';
+        }
+
+        function rateColor(pct) {
+          return pct < 0.5 ? '#27ae60' : pct < 2 ? '#f39c12' : '#e74c3c';
+        }
+
+        function rtColor(ms) {
+          return ms < 500 ? '#27ae60' : ms < 1000 ? '#2ecc71' : ms < 2000 ? '#f39c12' : '#e74c3c';
+        }
+
+        function renderResult(d) {
+          if (!d) return '<div class="k6-empty"><i class="fa fa-flask" style="font-size:40px;display:block;margin-bottom:10px"></i>Chưa có kết quả load test nào.<br><small>Chạy <code>k6 run script.js</code> để bắt đầu.</small></div>';
+
+          var html = '';
+          var p95 = d.http_req_duration_p95 || 0;
+          var failRate = (d.http_req_failed_rate || 0) * 100;
+          var checkRate = d.checks_total > 0 ? (d.checks_passed / d.checks_total * 100) : 100;
+          var vus = d.vus_max || 0;
+
+          // === VERDICT ===
+          var vLevel, vBg, vColor, vIcon, vTitle, vDesc;
+          if (failRate > 5 || p95 > 5000) {
+            vLevel = 'critical';
+            vBg = '#e74c3c';
+            vColor = '#fff';
+            vIcon = 'fa-times-circle';
+            vTitle = 'KHÔNG ĐẠT - Hệ thống gặp vấn đề nghiêm trọng';
+            vDesc = 'Với ' + vus + ' người dùng đồng thời, hệ thống có tỷ lệ lỗi ' + failRate.toFixed(2) + '% và thời gian phản hồi p95=' + fmtMs(p95) + '. Hệ thống không đáp ứng được mức tải này. Cần tối ưu hoặc nâng cấp hạ tầng.';
+          } else if (failRate > 1 || p95 > 3000) {
+            vLevel = 'warning';
+            vBg = '#f39c12';
+            vColor = '#fff';
+            vIcon = 'fa-exclamation-triangle';
+            vTitle = 'CẦN CẢI THIỆN - Hệ thống chịu tải kém';
+            vDesc = 'Với ' + vus + ' người dùng, phản hồi p95=' + fmtMs(p95) + ', lỗi ' + failRate.toFixed(2) + '%. Người dùng sẽ cảm thấy chậm. Nên tối ưu truy vấn DB, caching, hoặc cấu hình server.';
+          } else if (p95 > 1500) {
+            vLevel = 'acceptable';
+            vBg = '#3498db';
+            vColor = '#fff';
+            vIcon = 'fa-info-circle';
+            vTitle = 'CHẤP NHẬN ĐƯỢC - Hệ thống đáp ứng được nhưng cần cải thiện';
+            vDesc = 'Với ' + vus + ' người dùng, phản hồi p95=' + fmtMs(p95) + ', không lỗi. Hệ thống hoạt động nhưng tốc độ chưa lý tưởng.';
+          } else if (p95 > 500) {
+            vLevel = 'good';
+            vBg = '#2ecc71';
+            vColor = '#fff';
+            vIcon = 'fa-thumbs-up';
+            vTitle = 'TỐT - Hệ thống đáp ứng tốt';
+            vDesc = 'Với ' + vus + ' người dùng đồng thời, thời gian phản hồi p95=' + fmtMs(p95) + ' — nhanh và ổn định. Không có lỗi. Hệ thống sẵn sàng phục vụ production.';
+          } else {
+            vLevel = 'excellent';
+            vBg = '#27ae60';
+            vColor = '#fff';
+            vIcon = 'fa-check-circle';
+            vTitle = 'XUẤT SẮC - Hiệu năng tuyệt vời';
+            vDesc = 'Với ' + vus + ' người dùng đồng thời, phản hồi chỉ p95=' + fmtMs(p95) + ' — cực nhanh! Hệ thống có thể phục vụ nhiều người dùng hơn nữa.';
+          }
+
+          html += '<div class="k6-verdict" style="background:' + vBg + ';color:' + vColor + '">';
+          html += '<div class="k6-verdict-icon"><i class="fa ' + vIcon + '"></i></div>';
+          html += '<div class="k6-verdict-info"><h3>' + vTitle + '</h3><p>' + vDesc + '</p></div>';
+          html += '</div>';
+
+          // === METRICS GRID ===
+          html += '<div class="k6-grid">';
+
+          // VUs
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-users"></i> Số người dùng ảo (VUs)</div>';
+          html += '<div class="k6-metric-val" style="color:#8e44ad">' + vus + '</div>';
+          html += '<div class="k6-metric-desc">Số người truy cập đồng thời mô phỏng trong test</div></div>';
+
+          // Iterations
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-repeat"></i> Số lượt thực hiện</div>';
+          html += '<div class="k6-metric-val" style="color:#2c3e50">' + (d.iterations || 0) + '</div>';
+          html += '<div class="k6-metric-desc">Mỗi lượt = 1 user hoàn thành flow (login→xem trang→quiz)</div></div>';
+
+          // HTTP Requests
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-exchange"></i> Tổng HTTP request</div>';
+          html += '<div class="k6-metric-val" style="color:#2980b9">' + (d.http_reqs || 0) + '</div>';
+          html += '<div class="k6-metric-desc">Throughput: ' + (d.http_reqs_rate || 0).toFixed(1) + ' req/giây</div></div>';
+
+          // Duration
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-clock-o"></i> Thời gian test</div>';
+          html += '<div class="k6-metric-val" style="color:#7f8c8d">' + fmtDuration(d.duration || 0) + '</div>';
+          html += '<div class="k6-metric-desc">Tổng thời gian chạy test từ đầu đến cuối</div></div>';
+
+          // Response Time p95
+          var rtBadge = p95 < 500 ? badge('Xuất sắc', '#27ae60') : p95 < 2500 ? badge('Tốt', '#2ecc71') : p95 < 3000 ? badge('Chậm', '#f39c12') : badge('Rất chậm', '#e74c3c');
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-tachometer"></i> Tốc độ phản hồi (p95)' + rtBadge + '</div>';
+          html += '<div class="k6-metric-val" style="color:' + rtColor(p95) + '">' + fmtMs(p95) + '</div>';
+          html += '<div class="k6-metric-desc">95% requests nhanh hơn giá trị này. Avg=' + fmtMs(d.http_req_duration_avg || 0) + ', Med=' + fmtMs(d.http_req_duration_med || 0) + '</div></div>';
+
+          // Response Time breakdown
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-bar-chart"></i> Phân bố thời gian phản hồi</div>';
+          html += '<div class="k6-metric-val" style="font-size:14px;color:#555">';
+          html += 'Min: <b style="color:#27ae60">' + fmtMs(d.http_req_duration_min || 0) + '</b> &nbsp;';
+          html += 'p90: <b style="color:' + rtColor(d.http_req_duration_p90 || 0) + '">' + fmtMs(d.http_req_duration_p90 || 0) + '</b> &nbsp;';
+          html += 'Max: <b style="color:' + rtColor(d.http_req_duration_max || 0) + '">' + fmtMs(d.http_req_duration_max || 0) + '</b>';
+          html += '</div>';
+          html += '<div class="k6-metric-desc">Min = nhanh nhất, p90 = 90% nhanh hơn, Max = chậm nhất</div></div>';
+
+          // Error rate
+          var errBadge = failRate === 0 ? badge('Hoàn hảo', '#27ae60') : failRate < 1 ? badge('Chấp nhận', '#f39c12') : badge('Cao', '#e74c3c');
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-exclamation-triangle"></i> Tỷ lệ lỗi HTTP' + errBadge + '</div>';
+          html += '<div class="k6-metric-val" style="color:' + rateColor(failRate) + '">' + failRate.toFixed(2) + '%</div>';
+          html += '<div class="k6-metric-desc">' + (failRate === 0 ? 'Không có request nào bị lỗi — tuyệt vời!' : 'Có ' + Math.round(failRate / 100 * (d.http_reqs || 0)) + ' requests bị lỗi (timeout, 5xx)') + '</div></div>';
+
+          // Data transfer
+          html += '<div class="k6-metric"><div class="k6-metric-title"><i class="fa fa-download"></i> Dữ liệu truyền tải</div>';
+          html += '<div class="k6-metric-val" style="font-size:16px;color:#16a085">↓ ' + fmtBytes(d.data_received || 0) + ' / ↑ ' + fmtBytes(d.data_sent || 0) + '</div>';
+          html += '<div class="k6-metric-desc">Tổng lượng dữ liệu nhận (↓) và gửi (↑) trong test</div></div>';
+
+          html += '</div>'; // end grid
+
+          // === CHECKS ===
+          html += '<div class="k6-checks"><h5><i class="fa fa-check-square-o"></i> Kiểm tra nội dung trang (Content Checks)</h5>';
+          var checkPct = d.checks_total > 0 ? (d.checks_passed / d.checks_total * 100) : 100;
+          var checkColor = checkPct >= 99 ? '#27ae60' : checkPct >= 95 ? '#f39c12' : '#e74c3c';
+          html += '<div class="k6-check-bar"><div class="k6-check-fill" style="width:' + checkPct + '%;background:' + checkColor + '"></div></div>';
+          html += '<div class="k6-check-stats">';
+          html += '<span style="color:' + checkColor + ';font-weight:700">' + checkPct.toFixed(1) + '% đạt</span> — ';
+          html += '<span style="color:#27ae60">✓ ' + (d.checks_passed || 0) + ' đạt</span> &nbsp; ';
+          html += '<span style="color:#e74c3c">✗ ' + (d.checks_failed || 0) + ' lỗi</span> &nbsp; ';
+          html += '(Tổng: ' + (d.checks_total || 0) + ' kiểm tra)';
+          html += '</div>';
+          html += '<div class="k6-metric-desc" style="margin-top:6px">Mỗi request kiểm tra: status 200 và nội dung trang đúng (có chứa text "Thông báo", "Bài thi"...). Nếu thấp = session bị mất hoặc server trả sai nội dung.</div>';
+          html += '</div>';
+
+          return html;
+        }
+
+        function renderHistory(list) {
+          if (!list || list.length === 0) return '';
+          var html = '<div class="k6-history"><h5><i class="fa fa-history"></i> Lịch sử các lần test gần nhất (tối đa 20)</h5>';
+          html += '<table><thead><tr><th>Thời gian</th><th>VUs</th><th>Requests</th><th>p95</th><th>Lỗi</th><th>Checks</th><th>Kết quả</th><th></th></tr></thead><tbody>';
+          for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            var p95 = r.http_req_duration_p95 || 0;
+            var fail = (r.http_req_failed_rate || 0) * 100;
+            var chkPct = r.checks_total > 0 ? (r.checks_passed / r.checks_total * 100) : 100;
+            var verdict, vColor;
+            if (fail > 5 || p95 > 5000) {
+              verdict = 'KHÔNG ĐẠT';
+              vColor = '#e74c3c';
+            } else if (fail > 1 || p95 > 3000) {
+              verdict = 'CẢI THIỆN';
+              vColor = '#f39c12';
+            } else if (p95 > 1500) {
+              verdict = 'CHẤP NHẬN';
+              vColor = '#3498db';
+            } else if (p95 > 500) {
+              verdict = 'TỐT';
+              vColor = '#2ecc71';
+            } else {
+              verdict = 'XUẤT SẮC';
+              vColor = '#27ae60';
+            }
+
+            html += '<tr data-ts="' + (r.timestamp || '') + '">';
+            html += '<td>' + fmtTime(r.timestamp) + '</td>';
+            html += '<td><b>' + (r.vus_max || 0) + '</b></td>';
+            html += '<td>' + (r.http_reqs || 0) + '</td>';
+            html += '<td style="color:' + rtColor(p95) + ';font-weight:600">' + fmtMs(p95) + '</td>';
+            html += '<td style="color:' + rateColor(fail) + '">' + fail.toFixed(2) + '%</td>';
+            html += '<td>' + chkPct.toFixed(1) + '%</td>';
+            html += '<td><span style="color:' + vColor + ';font-weight:700">' + verdict + '</span></td>';
+            html += '<td><button class="k6-del-btn" data-ts="' + (r.timestamp || '') + '" title="Xóa dòng này"><i class="fa fa-trash"></i></button></td>';
+            html += '</tr>';
+          }
+          html += '</tbody></table></div>';
+          return html;
+        }
+
+        function loadK6() {
+          $.getJSON(K6_API, function(resp) {
+            var html = renderResult(resp.last);
+            html += renderHistory(resp.history);
+            $('#k6-content').html(html);
+            if (resp.last) {
+              $('#k6-last-time').text('Lần test gần nhất: ' + fmtTime(resp.last.timestamp));
+            }
+          }).fail(function() {
+            // silent fail
+          });
+        }
+
+        var DEL_API = window.base_url ? window.base_url + 'dashboard/delete_k6_result' : '<?php echo site_url("dashboard/delete_k6_result"); ?>';
+
+        $(document).on('click', '.k6-del-btn', function() {
+          var ts = $(this).data('ts');
+          var $tr = $(this).closest('tr');
+          $tr.css('opacity', '0.4');
+          $.post(DEL_API, {
+            ts: ts
+          }, function(resp) {
+            if (resp && resp.status === 'ok') {
+              $tr.remove();
+            } else {
+              $tr.css('opacity', '1');
+            }
+          }, 'json').fail(function() {
+            $tr.css('opacity', '1');
+          });
+        });
+
+        $(function() {
+          loadK6();
+          // Auto refresh khi tab visible
+          setInterval(loadK6, 15000);
+          $('#k6-refresh').on('click', loadK6);
         });
       })();
     </script>
