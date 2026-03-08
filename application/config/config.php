@@ -556,13 +556,26 @@ $config['encryption_key'] = 'savsoftquiz';
 | except for 'cookie_prefix' and 'cookie_httponly', which are ignored here.
 |
 */
-$config['sess_driver'] =  'files';//'database';//
-$config['sess_save_path'] = sys_get_temp_dir();
-$config['sess_cookie_name'] = 'ci_session';
-$config['sess_expiration'] = 7200;
+// ============================================================
+// SESSION DRIVER — chọn 1 trong 3 option bên dưới
+// ============================================================
 
-// Sửa dòng này: Trỏ thẳng vào thư mục sessions vừa tạo
-$config['sess_save_path'] = APPPATH . 'sessions';
+// OPTION 1 (Đang dùng): Redis — loại bỏ hoàn toàn session lock contention (HIỆU NĂNG TỐT NHẤT)
+// Redis server đã cài, PHP redis extension đã load
+$config['sess_driver']    = 'redis';
+$config['sess_save_path'] = 'tcp://127.0.0.1:6379?timeout=3&database=0';
+
+// OPTION 2: Database — lưu session vào MySQL, không cần extension thêm
+// Bảng ci_sessions đã được tạo bởi database/performance_indexes.sql
+// $config['sess_driver']    = 'database';
+// $config['sess_save_path'] = 'ci_sessions';
+
+// OPTION 3 (KHÔNG dùng cho production > 50 users):
+// $config['sess_driver']    = 'files';
+// $config['sess_save_path'] = APPPATH . 'sessions';
+
+$config['sess_cookie_name'] = 'ci_session';
+$config['sess_expiration']  = 7200;
 
 $config['sess_match_ip'] = FALSE;
 $config['sess_time_to_update'] = 300;

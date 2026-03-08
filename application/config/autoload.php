@@ -79,7 +79,8 @@ $autoload['libraries'] = array('session', 'database');
 |	$autoload['drivers'] = array('cache' => 'cch');
 |
 */
-$autoload['drivers'] = array();
+// 'cache' driver cần thiết cho query caching (Redis/file fallback)
+$autoload['drivers'] = array('cache');
 
 /*
 | -------------------------------------------------------------------

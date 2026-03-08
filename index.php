@@ -64,7 +64,7 @@ ob_start();
  */
 	//define('ENVIRONMENT', isset($_SERVER['CI_ENV']) ? $_SERVER['CI_ENV'] : 'production');
 // define('ENVIRONMENT', 'development');
-define('ENVIRONMENT', 'development');
+define('ENVIRONMENT', 'production');
 /* 
  *---------------------------------------------------------------
  * ERROR REPORTING

@@ -28,6 +28,7 @@ class Notification extends CI_Controller
 
 		$this->load->model("notification_model");
 		$logged_in = $this->session->userdata('logged_in');
+		session_write_close(); // giải phóng session lock sớm
 
 		if ($logged_in['su'] != '1') {
 			//	exit($this->lang->line('permission_denied'));

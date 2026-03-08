@@ -23,15 +23,17 @@ class Quiz extends CI_Controller {
 		// redirect if not loggedin
 		if(!$this->session->userdata('logged_in')){
 			redirect('login');
-			
+			exit;
 		}
 		$logged_in=$this->session->userdata('logged_in');
 		if($logged_in['base_url'] != base_url()){
 		$this->session->unset_userdata('logged_in');		
 		redirect('login');
+		exit;
 		}
 		
 		$logged_in=$this->session->userdata('logged_in');
+		session_write_close(); // giải phóng session lock sớm
 			 
 		$data['list_view']=$list_view;
 		$data['limit']=$limit;
@@ -425,9 +427,10 @@ function open_quiz($limit='0'){
  
 		if(!$this->session->userdata('logged_in')){
 			redirect('login');
-			
+			exit;
 		}
 		$logged_in=$this->session->userdata('logged_in');
+		session_write_close(); // giải phóng session lock sớm
 		$gid=$logged_in['gid'];
 		$data['title']=$this->lang->line('attempt').' '.$this->lang->line('quiz');
 		

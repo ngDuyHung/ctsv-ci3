@@ -61,8 +61,121 @@ class Dashboard extends CI_Controller {
 		$this->load->view('dashboard',$data);
 		$this->load->view('footer',$data);
 	}
-	
-	
+
+	/**
+	 * AJAX endpoint: trả về số session đang active (real-time)
+	 * Đọc từ Redis (DB 0) thay vì MySQL ci_sessions
+	 */
+	public function active_sessions()
+	{
+		$logged_in = $this->session->userdata('logged_in');
+		session_write_close();
+
+		while (ob_get_level()) { ob_end_clean(); }
+		header('Content-Type: application/json; charset=UTF-8');
+		header('Cache-Control: no-cache, no-store');
+
+		if (!$logged_in || $logged_in['su'] != '1') {
+			http_response_code(403);
+			echo json_encode(array('error' => 'forbidden'));
+			exit;
+		}
+
+		$now = time();
+		$max_lifetime = (int) $this->config->item('sess_expiration');
+		if ($max_lifetime <= 0) $max_lifetime = 7200;
+
+		// Kết nối Redis DB 0 (session database)
+		$redis = new Redis();
+		try {
+			$redis->connect('127.0.0.1', 6379, 3);
+			$redis->select(0);
+		} catch (Exception $e) {
+			echo json_encode(array(
+				'total_5m' => 0, 'logged_5m' => 0, 'active_1m' => 0,
+				'active_30s' => 0, 'total_db' => 0,
+				'time' => date('H:i:s'), 'ts' => $now,
+				'error' => 'Redis connection failed'
+			));
+			exit;
+		}
+
+		$total_keys = 0;
+		$total_5m = 0; $logged_5m = 0;
+		$active_1m = 0; $active_30s = 0;
+
+		// SCAN qua tất cả session keys, dùng pipeline cho TTL batch
+		$iterator = null;
+		$redis->setOption(Redis::OPT_SCAN, Redis::SCAN_RETRY);
+		$cutoff = $max_lifetime - 300; // TTL >= cutoff → active trong 5 phút
+
+		while (($keys = $redis->scan($iterator, 'ci_session:*', 200)) !== false) {
+			// Lọc bỏ lock keys
+			$session_keys = array();
+			foreach ($keys as $key) {
+				if (substr($key, -5) !== ':lock') {
+					$session_keys[] = $key;
+				}
+			}
+			if (empty($session_keys)) continue;
+
+			$total_keys += count($session_keys);
+
+			// Pipeline: batch TTL cho tất cả keys trong batch
+			$pipe = $redis->pipeline();
+			foreach ($session_keys as $key) {
+				$pipe->ttl($key);
+			}
+			$ttls = $pipe->exec();
+
+			// Tìm keys active trong 5 phút (TTL >= cutoff)
+			$active_keys = array();
+			foreach ($session_keys as $i => $key) {
+				$ttl = $ttls[$i];
+				if ($ttl >= $cutoff) {
+					$idle = $max_lifetime - $ttl;
+					$active_keys[] = array('key' => $key, 'idle' => max(0, $idle));
+				}
+			}
+
+			if (empty($active_keys)) continue;
+
+			// Pipeline: batch GET data cho active keys
+			$pipe2 = $redis->pipeline();
+			foreach ($active_keys as $ak) {
+				$pipe2->get($ak['key']);
+			}
+			$data_results = $pipe2->exec();
+
+			foreach ($active_keys as $i => $ak) {
+				$total_5m++;
+				$data = $data_results[$i];
+				$has_login = ($data !== false && strpos($data, 'logged_in') !== false);
+				if ($has_login) $logged_5m++;
+
+				if ($ak['idle'] <= 60) {
+					if ($has_login) $active_1m++;
+					if ($ak['idle'] <= 30) {
+						if ($has_login) $active_30s++;
+					}
+				}
+			}
+		}
+
+		$redis->close();
+
+		echo json_encode(array(
+			'total_5m'   => (int) $total_5m,
+			'logged_5m'  => (int) $logged_5m,
+			'active_1m'  => (int) $active_1m,
+			'active_30s' => (int) $active_30s,
+			'total_db'   => (int) $total_keys,
+			'time'       => date('H:i:s'),
+			'ts'         => $now
+		));
+		exit;
+	}
+
 		public function config(){
 		
 		$logged_in=$this->session->userdata('logged_in');

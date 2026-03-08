@@ -314,8 +314,10 @@ class CI_Session {
 		ini_set('session.use_strict_mode', 1);
 		ini_set('session.use_cookies', 1);
 		ini_set('session.use_only_cookies', 1);
-		ini_set('session.hash_function', 1);
-		ini_set('session.hash_bits_per_character', 4);
+		ini_set('session.hash_function', 1);          // PHP 7.x
+		ini_set('session.hash_bits_per_character', 4); // PHP 7.x
+		ini_set('session.sid_length', 40);             // PHP 8.x (replaces hash_function)
+		ini_set('session.sid_bits_per_character', 4);  // PHP 8.x (replaces hash_bits_per_character)
 	}
 
 	// ------------------------------------------------------------------------

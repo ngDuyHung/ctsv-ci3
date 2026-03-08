@@ -8,14 +8,31 @@ Class Notification_model extends CI_Model
 		 	$search=$this->input->post('search');
 			 $this->db->like('savsoft_notification.title',$search);
 			 $this->db->or_like('savsoft_notification.message',$search);
+			 // Không cache khi search
+			 $this->db->select('savsoft_notification.*,first_name,last_name');
+			 $this->db->limit($this->config->item('number_of_rows'),$limit);
+			 $this->db->order_by('savsoft_notification.created_date','desc');
+			 $this->db->join('savsoft_users','savsoft_notification.uid=savsoft_users.uid');
+			 $query=$this->db->get('savsoft_notification');
+			 return $query->result_array();
 		 }
+
+		// Cache theo offset, 60 giây
+		$cache_key = 'notif_all_' . (int)$limit;
+		$cached = $this->cache->get($cache_key);
+		if ($cached !== FALSE) {
+			return $cached;
+		}
+
 		$this->db->select('savsoft_notification.*,first_name,last_name');
 		$this->db->limit($this->config->item('number_of_rows'),$limit);
 		$this->db->order_by('savsoft_notification.created_date','desc');
 		 $this->db->join('savsoft_users','savsoft_notification.uid=savsoft_users.uid');
 		$query=$this->db->get('savsoft_notification');
-		//print_r($this->db->last_query());exit;
-		return $query->result_array();
+		$result = $query->result_array();
+
+		$this->cache->save($cache_key, $result, 60);
+		return $result;
 	}
 
 	function detail($nid)
@@ -30,18 +47,24 @@ Class Notification_model extends CI_Model
 
 	function new_notifications($limit=0)
  	{	
-		
-		$this->db->select('savsoft_notification.*,first_name,last_name');
-		//$where='(savsoft_notification.status=1) and (savsoft_notification.end_date >='.time()." OR savsoft_notification.end_date IS NULL )";
-		$where=' (savsoft_notification.end_date >='.time()." OR savsoft_notification.end_date IS NULL )";
+		// Cache 60 giây, key gồm time bucket 1 phút để tự động hết hạn
+		$cache_key = 'notif_new_' . (int)$limit;
+		$cached = $this->cache->get($cache_key);
+		if ($cached !== FALSE) {
+			return $cached;
+		}
 
+		$this->db->select('savsoft_notification.*,first_name,last_name');
+		$where=' (savsoft_notification.end_date >='.time()." OR savsoft_notification.end_date IS NULL )";
 		$this->db->where($where,NULL,FALSE);
 		
 		$this->db->order_by('savsoft_notification.created_date','desc');
 		 $this->db->join('savsoft_users','savsoft_notification.uid=savsoft_users.uid');
 		$query=$this->db->get('savsoft_notification');
-		//echo $this->db->last_query(); exit;
-		return $query->result_array();
+		$result = $query->result_array();
+
+		$this->cache->save($cache_key, $result, 60);
+		return $result;
 	}
 	function get_a_notification($nid)
  	{

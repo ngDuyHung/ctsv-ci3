@@ -3,36 +3,45 @@ Class Quiz_model extends CI_Model
 {
  
   function quiz_list($limit){
-	  
-		$logged_in=$this->session->userdata('logged_in');
-	//	print_r($logged_in);exit;
-			if($logged_in['su']=='0')
-			{
-			
-			$gid=$logged_in['gid'];
-			//echo "gids = ",$gid;exit;
-			$where="FIND_IN_SET('".$gid."', gids)";  
 
-			$this->db->where($where);
-			
-			//$this->db->where_in('gid',)
-			
+		$logged_in = $this->session->userdata('logged_in');
+		$is_search = ($this->input->post('search') && $logged_in['su'] == '1');
+
+		// Cache danh sách quiz theo nhóm sinh viên (gid + offset).
+		// Không cache khi admin đang tìm kiếm vì kết quả thay đổi liên tục.
+		$use_cache = !$is_search && $logged_in['su'] == '0';
+		if ($use_cache) {
+			$cache_key = 'ql_g' . (int)$logged_in['gid'] . '_' . (int)$limit;
+			$cached = $this->cache->get($cache_key);
+			if ($cached !== FALSE) {
+				return $cached;
 			}
-			
-			
-	 if($this->input->post('search') && $logged_in['su']=='1'){
-		 $search=$this->input->post('search');
-		 $this->db->or_where('quid',$search);
-		 $this->db->or_like('quiz_name',$search);
-		 $this->db->or_like('description',$search);
+		}
 
-	 }
-		 $this->db->limit($this->config->item('number_of_rows'),$limit);
-		$this->db->order_by('quid','desc');
-		$query=$this->db->get('savsoft_quiz');
-		return $query->result_array();
-		
-	 
+		if ($logged_in['su'] == '0') {
+			$gid = $logged_in['gid'];
+			$where = "FIND_IN_SET('" . $gid . "', gids)";
+			$this->db->where($where);
+		}
+
+		if ($is_search) {
+			$search = $this->input->post('search');
+			$this->db->or_where('quid', $search);
+			$this->db->or_like('quiz_name', $search);
+			$this->db->or_like('description', $search);
+		}
+
+		$this->db->limit($this->config->item('number_of_rows'), $limit);
+		$this->db->order_by('quid', 'desc');
+		$query  = $this->db->get('savsoft_quiz');
+		$result = $query->result_array();
+
+		// Lưu cache 60 giây cho sinh viên (TTL ngắn để phản ánh thay đổi kịp thời)
+		if ($use_cache) {
+			$this->cache->save($cache_key, $result, 60);
+		}
+
+		return $result;
  }
  
  
@@ -355,18 +364,23 @@ function get_qcl($quid){
 
  
  function get_quiz($quid){
-	 $this->db->where('quid',$quid);
-	
-	 $query=$this->db->get('savsoft_quiz');
-	// return $query->row_array();
-	//hungtv
-	$data = $query->row_array();
-	$logged_in=$this->session->userdata('logged_in');
-	$gid=$logged_in['gid'];
-	$gids = explode(',', $data['gids']);
-	if (!in_array($gid, $gids))
-		return [];
-	else return $data;
+	 // Cache row quiz thô 120 giây — nhiều sinh viên cùng vào quiz_detail/X sẽ dùng cache
+	 $cache_key = 'quiz_row_' . (int)$quid;
+	 $data = $this->cache->get($cache_key);
+	 if ($data === FALSE) {
+		 $this->db->where('quid', $quid);
+		 $query = $this->db->get('savsoft_quiz');
+		 $data  = $query->row_array();
+		 if (!empty($data)) {
+			 $this->cache->save($cache_key, $data, 120);
+		 }
+	 }
+	 if (empty($data)) return [];
+	 //hungtv — kiểm tra quyền truy cập theo gid
+	 $logged_in = $this->session->userdata('logged_in');
+	 $gid  = $logged_in['gid'];
+	 $gids = explode(',', $data['gids']);
+	 return in_array($gid, $gids) ? $data : [];
  }
  //Lay de thi theo khoa da phan thoi gian
  function get_quiz_time($quid){
@@ -1004,13 +1018,30 @@ if($this->config->item('allow_result_email')){
 		
 	}
 	function get_quiz_time_group($quid,$gid){
+		$cache_key = 'qtg_' . (int)$quid . '_' . (int)$gid;
+		$cached = $this->cache->get($cache_key);
+		if ($cached !== FALSE) {
+			return $cached;
+		}
+
 		$this->db->select('gids');
 		$this->db->where('quid',$quid);
 		$query=$this->db->get('savsoft_quiz');
-		$gids= $query->row_array()['gids'];
-		$query_str="SELECT * from savsoft_time WHERE gid in (".$gids.") AND facultyid='".$this->session->userdata('logged_in')['facultyid']."' AND gid=".$gid;
-		$query=$this->db->query($query_str);
-		return $query->row_array();
+		$row = $query->row_array();
+		if (!$row) return array();
+		$gids = $row['gids'];
+
+		$logged_in = $this->session->userdata('logged_in');
+		$facultyid = $logged_in['facultyid'];
+		$this->db->where("gid IN ($gids)", NULL, FALSE);
+		$this->db->where('facultyid', $facultyid);
+		$this->db->where('gid', $gid);
+		$query = $this->db->get('savsoft_time');
+		$result = $query->row_array();
+		if (!$result) $result = array();
+
+		$this->cache->save($cache_key, $result, 60);
+		return $result;
 	}
 	//Bang: 28-8-2021
 	//An 1 bai thi

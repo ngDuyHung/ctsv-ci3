@@ -93,25 +93,37 @@ Class Survey_model extends CI_Model
 	}
 	public function current_semester()
 	{
+		$cached = $this->cache->get('current_semester');
+		if ($cached !== FALSE) return $cached;
+
 		$this->db->select("concat(year,'-',semester) as semester");
 		$this->db->where('status',1);
 		$query=$this->db->get('school-year');	
 		$row=$query->row();
-		if($row)
-			return $row->semester;
-		return null;
+		$result = $row ? $row->semester : null;
+
+		if ($result !== null) $this->cache->save('current_semester', $result, 300);
+		return $result;
 	}
 	function check()
 	{
 		$logged_in=$this->session->userdata('logged_in');
 		$uid=$logged_in['uid'];
 		$semester=$this->current_semester();
+
+		$cache_key = 'survey_chk_' . (int)$uid . '_' . $semester;
+		$cached = $this->cache->get($cache_key);
+		if ($cached !== FALSE) {
+			return $cached;
+		}
+
 		$this->db->where('uid',$logged_in['uid']);
 		$this->db->where('semester',$semester);
 		$query=$this->db->get('savsoft_survey');
-		if($query->num_rows()>0)
-			return 1;
-		return 0;
+		$result = ($query->num_rows()>0) ? 1 : 0;
+
+		$this->cache->save($cache_key, $result, 120);
+		return $result;
 	}
 }
 ?>

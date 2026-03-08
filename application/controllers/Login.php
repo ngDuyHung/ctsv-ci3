@@ -129,13 +129,14 @@ public function pre_registration()
 					// eubscription expired, redirect to payment page
 					
 					redirect('payment_gateway/subscription_expired/'.$user['uid']);
-					
+					exit;
 				}
 				
 			}
 			$user['base_url']=base_url();
 			// creating login cookie
 			$this->session->set_userdata('logged_in', $user);
+			session_write_close();
 			//print_r($user);exit;
 			// redirect to dashboard
 			if($user['su']=='1'){
@@ -143,10 +144,11 @@ public function pre_registration()
 				//print_r($user);
 			//echo "<a href='" .base_url()."dashboard'>dashboard</a>";exit;
 			 redirect('dashboard');
-				 
+			 exit;
 			}else{
 				$burl=$this->config->item('base_url').'notification';
 			 header("location:$burl");
+			 exit;
 			}
 		}else if($status['status']=='0'){
 			 
